@@ -1,0 +1,3 @@
+example.com
+
+reverse_proxy http://scalelite-api:3000

@@ -1,0 +1,88 @@
+version: '3'
+
+volumes:
+  postgres-data:
+  redis-data:
+
+services:
+  postgres:
+    image: postgres:11.5-alpine
+    container_name: postgres
+    restart: unless-stopped
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
+
+  redis:
+    image: redis:5.0-alpine
+    container_name: redis
+    restart: on-failure
+    volumes:
+      - redis-data:/data
+      
+  scalelite-proxy:
+    image: caddy:2.1.1
+    restart: unless-stopped
+    container_name: scalelite-proxy
+    depends_on:
+      - scalelite-api
+      - db
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+    ports:
+      - "80:80"
+      - "443:443"
+    
+  scalelite-api:
+    image: aakatev/scalelite:v0-api
+    container_name: scalelite-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./log/scalelite/:/app/log
+      - ${SCALELITE_RECORDING_DIR-/mnt/scalelite-recordings/var/bigbluebutton}:/var/bigbluebutton
+    environment:
+      - SECRET_KEY_BASE=${SECRET_KEY_BASE}
+      - LOADBALANCER_SECRET=${LOADBALANCER_SECRET}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - DATABASE_URL=${DATABASE_URL:-postgres://postgres:password@postgres:5432/scalelite?pool=5}
+      - URL_HOST=${URL_HOST}
+    depends_on:
+      - postgres
+      - redis
+    logging:
+      driver: journald
+
+  scalelite-poller:
+    image: blindsidenetwks/scalelite:v1.0.5-poller
+    container_name: scalelite-poller
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - DATABASE_URL=${DATABASE_URL:-postgres://postgres:password@postgres:5432/scalelite?pool=5}
+    depends_on:
+      - postgres
+      - redis
+      - scalelite-api
+    logging:
+      driver: journald
+
+  scalelite-recording-importer:
+    image: blindsidenetwks/scalelite:v1.0.5-recording-importer
+    container_name: scalelite-recording-importer
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - DATABASE_URL=${DATABASE_URL:-postgres://postgres:password@postgres:5432/scalelite?pool=5}
+    volumes:
+      - ${SCALELITE_RECORDING_DIR-/mnt/scalelite-recordings/var/bigbluebutton}:/var/bigbluebutton
+      - ${SCALELITE_RECORDING_DIR-/mnt/scalelite-recordings/var/bigbluebutton}/spool:/var/bigbluebutton/spool
+    depends_on:
+      - postgres
+      - redis
+      - scalelite-api
+    logging:
+      driver: journald
